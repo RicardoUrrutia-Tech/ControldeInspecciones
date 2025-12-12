@@ -1,6 +1,5 @@
 import io
 import re
-import requests
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
@@ -14,15 +13,15 @@ st.set_page_config(
 )
 
 # =========================================================
-# URLs Google Sheets (exportación a Excel)
+# Links de descarga (privado: descarga ocurre con sesión del usuario)
 # =========================================================
-PATENTES_XLSX_URL = (
+PATENTES_EXPORT_URL = (
     "https://docs.google.com/spreadsheets/d/"
     "1DSZA9DJkxWHBIOMyulW3638TF46Udq7tCWh489UAOAs/"
     "export?format=xlsx&gid=1266707607"
 )
 
-INSPECCIONES_XLSX_URL = (
+INSPECCIONES_EXPORT_URL = (
     "https://docs.google.com/spreadsheets/d/"
     "1UR2GTh6l4nwmx4DdY6yX_BS7EF1l-LYHtzHQdkYx03c/"
     "export?format=xlsx"
@@ -32,6 +31,7 @@ INSPECCIONES_XLSX_URL = (
 # Utilidades
 # =========================================================
 def normalize_plate(x: str) -> str:
+    """Normaliza patente: mayúsculas y solo A-Z0-9."""
     if pd.isna(x):
         return ""
     s = str(x).strip().upper()
@@ -39,26 +39,18 @@ def normalize_plate(x: str) -> str:
     return s
 
 def try_parse_date(series: pd.Series) -> pd.Series:
+    """
+    Intenta parsear fechas:
+    - texto datetime (dayfirst)
+    - serial Excel
+    """
     dt = pd.to_datetime(series, errors="coerce", dayfirst=True)
     mask = dt.isna()
     if mask.any():
         numeric = pd.to_numeric(series[mask], errors="coerce")
-        dt2 = pd.to_datetime(
-            numeric, unit="D", origin="1899-12-30", errors="coerce"
-        )
+        dt2 = pd.to_datetime(numeric, unit="D", origin="1899-12-30", errors="coerce")
         dt.loc[mask] = dt2
     return dt
-
-def load_excel_from_gsheets(url: str) -> pd.DataFrame:
-    r = requests.get(url, timeout=30)
-    ct = r.headers.get("content-type", "").lower()
-
-    if r.status_code != 200:
-        raise RuntimeError(f"HTTP {r.status_code}")
-    if "text/html" in ct:
-        raise RuntimeError("Google devolvió HTML (permisos/login)")
-
-    return pd.read_excel(io.BytesIO(r.content))
 
 def traffic_light(days, green_max, yellow_max):
     if pd.isna(days):
@@ -76,108 +68,108 @@ def to_excel_bytes(df: pd.DataFrame) -> bytes:
     return output.getvalue()
 
 # =========================================================
-# Título
+# UI
 # =========================================================
 st.title("🚗 Última inspección por patente – Aeropuerto")
 
-# =========================================================
-# Descargas rápidas
-# =========================================================
-st.subheader("⬇️ Descargas rápidas (Google Sheets → Excel)")
-
-c1, c2 = st.columns(2)
-with c1:
-    st.link_button("📄 Descargar Base Patentes", PATENTES_XLSX_URL)
-with c2:
-    st.link_button("📝 Descargar Inspecciones", INSPECCIONES_XLSX_URL)
+st.caption(
+    "Esta app mantiene los Google Sheets **privados**. "
+    "La descarga se hace en tu navegador usando tu **sesión corporativa**, y luego subes los Excel aquí."
+)
 
 st.divider()
 
 # =========================================================
-# Fuente de datos
+# Asistente Paso 1: sesión corporativa + descargas
 # =========================================================
-st.subheader("📌 Fuente de datos")
+st.subheader("Paso 1) Inicia sesión con tu cuenta corporativa y descarga los Excel")
 
-source = st.radio(
-    "¿Cómo deseas cargar los datos?",
-    [
-        "🌐 Usar versión online (recomendado)",
-        "📤 Subir archivos manualmente",
-    ],
+st.info(
+    "✅ Abre cada botón y descarga el Excel.\n"
+    "Si te aparece **Access denied / Solicitar acceso**, inicia sesión con tu **cuenta corporativa** "
+    "y vuelve a intentar.\n\n"
+    "Luego vuelve a esta app para subir ambos archivos."
 )
 
-df_pat = None
-df_insp = None
+c1, c2 = st.columns(2)
+with c1:
+    st.link_button("📄 Descargar Base Patentes (Excel)", PATENTES_EXPORT_URL)
+with c2:
+    st.link_button("📝 Descargar Inspecciones (Excel)", INSPECCIONES_EXPORT_URL)
 
-if source.startswith("🌐"):
-    with st.spinner("Descargando datos desde Google Sheets..."):
-        try:
-            df_pat = load_excel_from_gsheets(PATENTES_XLSX_URL)
-            df_insp = load_excel_from_gsheets(INSPECCIONES_XLSX_URL)
-            st.success("✅ Datos cargados correctamente desde Google Sheets")
-        except Exception as e:
-            st.error(
-                f"No se pudieron cargar los datos online.\n\nDetalle: {e}"
-            )
-            st.stop()
-else:
-    col_u1, col_u2 = st.columns(2)
-    with col_u1:
-        f_pat = st.file_uploader(
-            "Sube Base Patentes Aeropuerto",
-            type=["xlsx", "xls"]
-        )
-    with col_u2:
-        f_insp = st.file_uploader(
-            "Sube Inspecciones Aeropuerto",
-            type=["xlsx", "xls"]
-        )
+st.write("")
+logged = st.checkbox("✅ Ya inicié sesión con mi cuenta corporativa (si era necesario)")
 
-    if not f_pat or not f_insp:
-        st.info("👆 Sube ambos archivos para continuar.")
-        st.stop()
-
-    df_pat = pd.read_excel(f_pat)
-    df_insp = pd.read_excel(f_insp)
+st.divider()
 
 # =========================================================
-# Configuración semáforo
+# Paso 2: Subida de archivos
 # =========================================================
-with st.expander("⚙️ Configuración semáforo", expanded=True):
-    c1, c2 = st.columns(2)
-    with c1:
-        green_max = st.number_input(
-            "🟢 OK hasta (días)", min_value=0, value=7
-        )
-    with c2:
-        yellow_max = st.number_input(
-            "🟡 Alerta hasta (días)", min_value=0, value=30
-        )
-    if yellow_max < green_max:
-        yellow_max = green_max
+st.subheader("Paso 2) Sube los dos archivos descargados")
 
-# =========================================================
-# Validaciones mínimas
-# =========================================================
-if "REG PLATE" not in df_pat.columns:
-    st.error("La base de Patentes debe tener la columna REG PLATE")
+if not logged:
+    st.warning(
+        "Marca el checkbox cuando hayas iniciado sesión con tu cuenta corporativa (si lo necesitabas). "
+        "Luego sube ambos archivos."
+    )
+
+col_u1, col_u2 = st.columns(2)
+with col_u1:
+    f_pat = st.file_uploader("Sube **Base Patentes Aeropuerto** (Excel)", type=["xlsx", "xls"])
+with col_u2:
+    f_insp = st.file_uploader("Sube **Inspecciones Aeropuerto** (Excel)", type=["xlsx", "xls"])
+
+if not f_pat or not f_insp:
+    st.info("👆 Sube ambos archivos para continuar al Paso 3.")
     st.stop()
 
-required_insp = [
+# Leer excels
+df_pat = pd.read_excel(f_pat)
+df_insp = pd.read_excel(f_insp)
+
+# Validaciones para guiar si suben el archivo incorrecto
+if "REG PLATE" not in df_pat.columns:
+    st.error(
+        "❌ El archivo de Patentes no parece correcto: falta la columna **REG PLATE**.\n"
+        "Descárgalo desde el botón corporativo y vuelve a subirlo."
+    )
+    st.stop()
+
+needed_insp = {
     "Fecha",
     "Patente del Vehículo",
     "Cumplimiento Exterior",
     "Cumplimiento Interior",
     "Cumplimiento Conductor",
-]
-missing = [c for c in required_insp if c not in df_insp.columns]
-if missing:
-    st.error(f"En Inspecciones faltan columnas: {missing}")
+}
+if not needed_insp.issubset(set(df_insp.columns)):
+    st.error(
+        "❌ El archivo de Inspecciones no parece correcto: faltan columnas clave "
+        "(Fecha / Patente del Vehículo / Cumplimientos).\n"
+        "Descárgalo desde el botón corporativo y vuelve a subirlo."
+    )
     st.stop()
 
+st.success("✅ Archivos cargados correctamente.")
+st.divider()
+
 # =========================================================
+# Paso 3: Configuración + Resultados
+# =========================================================
+st.subheader("Paso 3) Resultados")
+
+with st.expander("⚙️ Configuración semáforo (días desde la última inspección)", expanded=True):
+    a1, a2 = st.columns(2)
+    with a1:
+        green_max = st.number_input("🟢 OK hasta (días)", min_value=0, value=7, step=1)
+    with a2:
+        yellow_max = st.number_input("🟡 Alerta hasta (días)", min_value=0, value=30, step=1)
+
+    if yellow_max < green_max:
+        st.warning("El umbral 🟡 (Alerta) no puede ser menor que 🟢 (OK). Se ajustó automáticamente.")
+        yellow_max = green_max
+
 # Procesamiento
-# =========================================================
 df_pat = df_pat.copy()
 df_insp = df_insp.copy()
 
@@ -185,8 +177,10 @@ df_pat["plate_norm"] = df_pat["REG PLATE"].apply(normalize_plate)
 df_insp["plate_norm"] = df_insp["Patente del Vehículo"].apply(normalize_plate)
 df_insp["Fecha_dt"] = try_parse_date(df_insp["Fecha"])
 
+# Última inspección por patente
 df_last = (
-    df_insp[df_insp["Fecha_dt"].notna()]
+    df_insp[df_insp["plate_norm"] != ""]
+    .loc[df_insp["Fecha_dt"].notna()]
     .sort_values(["plate_norm", "Fecha_dt"], ascending=[True, False])
     .groupby("plate_norm", as_index=False)
     .first()
@@ -206,100 +200,122 @@ df = df_pat.merge(df_last, on="plate_norm", how="left")
 
 today = pd.Timestamp.today().normalize()
 df["Inspeccionado"] = df["Última Fecha Inspección"].notna()
-df["Días desde última inspección"] = (
-    today - pd.to_datetime(df["Última Fecha Inspección"])
-).dt.days
+df["Días desde última inspección"] = (today - pd.to_datetime(df["Última Fecha Inspección"])).dt.days
+df["Semáforo"] = df["Días desde última inspección"].apply(lambda x: traffic_light(x, green_max, yellow_max))
 
-df["Semáforo"] = df["Días desde última inspección"].apply(
-    lambda x: traffic_light(x, green_max, yellow_max)
-)
-
-# =========================================================
 # KPIs
-# =========================================================
-k1, k2, k3 = st.columns(3)
-k1.metric("Total Patentes", len(df))
-k2.metric("Con inspección", int(df["Inspeccionado"].sum()))
-k3.metric("Sin inspección", int((~df["Inspeccionado"]).sum()))
+total_pat = int(df["REG PLATE"].notna().sum())
+inspected = int(df["Inspeccionado"].sum())
+never = total_pat - inspected
+
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("Total Patentes", f"{total_pat:,}".replace(",", "."))
+k2.metric("Con inspección", f"{inspected:,}".replace(",", "."))
+k3.metric("Sin inspección", f"{never:,}".replace(",", "."))
+k4.metric("Fecha de cálculo", today.strftime("%Y-%m-%d"))
 
 st.divider()
 
-# =========================================================
-# Tablas TOP
-# =========================================================
+# Top tablas
 left, right = st.columns(2)
 
 with left:
-    st.subheader("🧾 Top sin inspección")
+    st.subheader("🧾 Top sin inspección (primeras 20)")
+    base_cols = [c for c in ["REG PLATE", "Flota", "Company", "Marca", "Modelo", "Color"] if c in df.columns]
+    cols_never = base_cols + ["Semáforo"]
     st.dataframe(
-        df[df["Inspeccionado"] == False]
-        .head(20)[["REG PLATE", "Semáforo"]],
+        df[df["Inspeccionado"] == False][cols_never].head(20),
         use_container_width=True,
-        hide_index=True,
+        hide_index=True
     )
 
 with right:
-    st.subheader("🕰️ Top inspecciones más antiguas")
+    st.subheader("🕰️ Top inspecciones más antiguas (primeras 20)")
+    cols_old = [
+        "REG PLATE",
+        "Última Fecha Inspección",
+        "Días desde última inspección",
+        "Semáforo",
+        "Cumplimiento Exterior",
+        "Cumplimiento Interior",
+        "Cumplimiento Conductor",
+    ]
+    cols_old = [c for c in cols_old if c in df.columns]
     st.dataframe(
         df[df["Inspeccionado"] == True]
-        .sort_values("Días desde última inspección", ascending=False)
-        .head(20)[
-            [
-                "REG PLATE",
-                "Última Fecha Inspección",
-                "Días desde última inspección",
-                "Semáforo",
-                "Cumplimiento Exterior",
-                "Cumplimiento Interior",
-                "Cumplimiento Conductor",
-            ]
-        ],
+        .sort_values("Días desde última inspección", ascending=False)[cols_old]
+        .head(20),
         use_container_width=True,
-        hide_index=True,
+        hide_index=True
     )
 
 st.divider()
 
-# =========================================================
 # Gráfico distribución
-# =========================================================
-st.subheader("📊 Distribución de días desde última inspección")
+st.subheader("📊 Distribución de días desde última inspección (solo inspeccionados)")
 
-vals = df.loc[df["Inspeccionado"], "Días desde última inspección"].dropna()
-if not vals.empty:
+vals = df.loc[df["Inspeccionado"] == True, "Días desde última inspección"].dropna()
+if vals.empty:
+    st.info("No hay inspecciones con fecha válida para graficar.")
+else:
+    bins = st.slider("Número de bins (barras)", min_value=5, max_value=60, value=20, step=1)
     fig = plt.figure()
-    plt.hist(vals, bins=20)
-    plt.xlabel("Días")
+    plt.hist(vals, bins=bins)
+    plt.xlabel("Días desde última inspección")
     plt.ylabel("Cantidad de patentes")
     st.pyplot(fig)
-else:
-    st.info("No hay inspecciones con fecha válida.")
 
 st.divider()
 
-# =========================================================
-# Tabla principal + descarga
-# =========================================================
-st.subheader("📋 Resultado completo")
+# Tabla principal filtrable
+st.subheader("📋 Resultado completo (filtrable)")
 
-df_view = df[
-    [
-        "REG PLATE",
-        "Semáforo",
-        "Última Fecha Inspección",
-        "Días desde última inspección",
-        "Cumplimiento Exterior",
-        "Cumplimiento Interior",
-        "Cumplimiento Conductor",
-        "Inspeccionado",
-    ]
+f1, f2, f3, f4 = st.columns([1, 1, 1, 2])
+with f1:
+    only_never = st.checkbox("Solo SIN inspección", value=False)
+with f2:
+    only_inspected = st.checkbox("Solo CON inspección", value=False)
+with f3:
+    sem_filter = st.selectbox("Filtrar por semáforo", ["(Todos)", "⚫ Sin inspección", "🔴 Crítico", "🟡 Alerta", "🟢 OK"])
+with f4:
+    q = st.text_input("Buscar patente (ej: ABCD12)", value="").strip().upper()
+
+df_show = df.copy()
+
+if only_never and not only_inspected:
+    df_show = df_show[df_show["Inspeccionado"] == False]
+elif only_inspected and not only_never:
+    df_show = df_show[df_show["Inspeccionado"] == True]
+
+if sem_filter != "(Todos)":
+    df_show = df_show[df_show["Semáforo"] == sem_filter]
+
+if q:
+    qn = normalize_plate(q)
+    df_show = df_show[df_show["plate_norm"].str.contains(qn, na=False)]
+
+cols_view = [
+    "REG PLATE",
+    "Semáforo",
+    "Última Fecha Inspección",
+    "Días desde última inspección",
+    "Cumplimiento Exterior",
+    "Cumplimiento Interior",
+    "Cumplimiento Conductor",
+    "Inspeccionado",
 ]
+optional_base_cols = ["Marca", "Modelo", "Color", "Flota", "Company"]
+for c in optional_base_cols:
+    if c in df_show.columns and c not in cols_view:
+        cols_view.insert(1, c)
 
-st.dataframe(df_view, use_container_width=True, hide_index=True)
+cols_view = [c for c in cols_view if c in df_show.columns]
+
+st.dataframe(df_show[cols_view], use_container_width=True, hide_index=True)
 
 st.download_button(
-    "⬇️ Descargar resultado (Excel)",
-    data=to_excel_bytes(df_view),
+    "⬇️ Descargar resultado filtrado (Excel)",
+    data=to_excel_bytes(df_show[cols_view]),
     file_name="ultima_inspeccion_por_patente.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
