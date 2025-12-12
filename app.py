@@ -30,6 +30,22 @@ INSPECCIONES_EXPORT_URL = (
 # =========================================================
 # Utilidades
 # =========================================================
+def normalize_headers(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normaliza encabezados para evitar errores por:
+    - espacios dobles / al final
+    - saltos de línea
+    - NBSP (espacio no separable)
+    """
+    df = df.copy()
+    df.columns = (
+        df.columns.astype(str)
+        .str.replace("\u00a0", " ", regex=False)   # NBSP
+        .str.replace(r"\s+", " ", regex=True)     # colapsa espacios/saltos de línea
+        .str.strip()                              # quita espacios al inicio/fin
+    )
+    return df
+
 def normalize_plate(x: str) -> str:
     """Normaliza patente: mayúsculas y solo A-Z0-9."""
     if pd.isna(x):
@@ -127,27 +143,36 @@ if not f_pat or not f_insp:
 df_pat = pd.read_excel(f_pat)
 df_insp = pd.read_excel(f_insp)
 
-# Validaciones para guiar si suben el archivo incorrecto
+# Normalizar encabezados (FIX clave)
+df_pat = normalize_headers(df_pat)
+df_insp = normalize_headers(df_insp)
+
+# Validaciones (ya robustas gracias a normalize_headers)
 if "REG PLATE" not in df_pat.columns:
     st.error(
         "❌ El archivo de Patentes no parece correcto: falta la columna **REG PLATE**.\n"
         "Descárgalo desde el botón corporativo y vuelve a subirlo."
     )
+    with st.expander("Ver columnas detectadas (Patentes)"):
+        st.write(list(df_pat.columns))
     st.stop()
 
-needed_insp = {
+required_insp = [
     "Fecha",
     "Patente del Vehículo",
     "Cumplimiento Exterior",
     "Cumplimiento Interior",
     "Cumplimiento Conductor",
-}
-if not needed_insp.issubset(set(df_insp.columns)):
+]
+missing = [c for c in required_insp if c not in df_insp.columns]
+if missing:
     st.error(
-        "❌ El archivo de Inspecciones no parece correcto: faltan columnas clave "
-        "(Fecha / Patente del Vehículo / Cumplimientos).\n"
-        "Descárgalo desde el botón corporativo y vuelve a subirlo."
+        "❌ El archivo de Inspecciones no parece correcto: faltan columnas clave:\n- "
+        + "\n- ".join(missing)
+        + "\n\nDescárgalo desde el botón corporativo y vuelve a subirlo."
     )
+    with st.expander("Ver columnas detectadas (Inspecciones)"):
+        st.write(list(df_insp.columns))
     st.stop()
 
 st.success("✅ Archivos cargados correctamente.")
@@ -319,3 +344,14 @@ st.download_button(
     file_name="ultima_inspeccion_por_patente.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
+
+# =========================================================
+# Bloque final: solución de problemas
+# =========================================================
+with st.expander("🛠️ Solución de problemas (si no puedes descargar)"):
+    st.markdown(
+        "- Si al abrir los enlaces aparece **Solicitar acceso / Access denied**, inicia sesión con tu **cuenta corporativa**.\n"
+        "- Si aun así no te deja, pide permisos al dueño del archivo (Drive corporativo).\n"
+        "- Si subes un Excel y la app dice que faltan columnas, revisa que hayas descargado el archivo correcto desde los botones."
+    )
+
