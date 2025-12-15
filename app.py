@@ -5,27 +5,46 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 # =========================================================
+# Configuración general (DEBE ir antes que cualquier st.*)
+# =========================================================
+st.set_page_config(
+    page_title="Última Inspección por Patente – Aeropuerto",
+    layout="wide"
+)
+
+# =========================================================
 # SSO / Acceso restringido (Google OAuth vía Streamlit)
 # =========================================================
-CORP_DOMAIN = "@gmail.com"  # ✅ por ahora para pruebas; luego cambia a @tuempresa.com
+CORP_DOMAIN = "@gmail.com"  # ✅ pruebas; luego cambia a @tuempresa.com
 
 def require_login_and_domain():
-    """
-    Bloquea toda la app hasta que el usuario inicie sesión.
-    Luego valida dominio del correo.
-    """
-    # Pantalla de login si no está autenticado
+    # 1) Verifica que existan secrets de auth (para evitar errores confusos)
+    if "auth" not in st.secrets:
+        st.error(
+            "No se encontró configuración [auth] en Secrets de Streamlit Cloud.\n\n"
+            "Ve a Settings → Secrets y pega el bloque [auth] (client_id, client_secret, redirect_uri, etc.)."
+        )
+        st.stop()
+
+    # 2) Compatibilidad: si st.user no está disponible por versión/config
+    user_obj = getattr(st, "user", None)
+    if user_obj is None:
+        st.error(
+            "Tu versión/configuración de Streamlit no expone st.user.\n\n"
+            "Verifica que estás usando streamlit reciente y que OAuth esté configurado."
+        )
+        st.stop()
+
+    # 3) Si no está logueado, muestra pantalla de login
     if not getattr(st.user, "is_logged_in", False):
-        st.set_page_config(page_title="Acceso restringido", layout="centered")
         st.title("🔐 Acceso restringido")
         st.write("Debes iniciar sesión con Google para usar esta aplicación.")
         st.button("Iniciar sesión con Google", on_click=st.login)
         st.stop()
 
-    # Validación de dominio
+    # 4) Validación de dominio
     email = (getattr(st.user, "email", "") or "").lower()
     if not email.endswith(CORP_DOMAIN):
-        st.set_page_config(page_title="Acceso restringido", layout="centered")
         st.title("🔐 Acceso restringido")
         st.error(f"Debes ingresar con una cuenta permitida ({CORP_DOMAIN}).")
         st.write(f"Sesión detectada: {email or '(sin email)'}")
@@ -40,14 +59,6 @@ with st.sidebar:
     st.write("### Sesión")
     st.write(f"Conectado como: **{st.user.email}**")
     st.button("Cerrar sesión", on_click=st.logout)
-
-# =========================================================
-# Configuración general
-# =========================================================
-st.set_page_config(
-    page_title="Última Inspección por Patente – Aeropuerto",
-    layout="wide"
-)
 
 # =========================================================
 # Links de descarga (privado: descarga ocurre con sesión del usuario)
@@ -184,7 +195,7 @@ df_insp = pd.read_excel(f_insp)
 df_pat = normalize_headers(df_pat)
 df_insp = normalize_headers(df_insp)
 
-# Validaciones (ya robustas gracias a normalize_headers)
+# Validaciones
 if "REG PLATE" not in df_pat.columns:
     st.error(
         "❌ El archivo de Patentes no parece correcto: falta la columna **REG PLATE**.\n"
@@ -382,9 +393,6 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
-# =========================================================
-# Bloque final: solución de problemas
-# =========================================================
 with st.expander("🛠️ Solución de problemas (si no puedes descargar)"):
     st.markdown(
         "- Si al abrir los enlaces aparece **Solicitar acceso / Access denied**, inicia sesión con tu **cuenta corporativa**.\n"
