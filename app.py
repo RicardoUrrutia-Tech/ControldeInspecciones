@@ -5,6 +5,43 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 # =========================================================
+# SSO / Acceso restringido (Google OAuth vía Streamlit)
+# =========================================================
+CORP_DOMAIN = "@gmail.com"  # ✅ por ahora para pruebas; luego cambia a @tuempresa.com
+
+def require_login_and_domain():
+    """
+    Bloquea toda la app hasta que el usuario inicie sesión.
+    Luego valida dominio del correo.
+    """
+    # Pantalla de login si no está autenticado
+    if not getattr(st.user, "is_logged_in", False):
+        st.set_page_config(page_title="Acceso restringido", layout="centered")
+        st.title("🔐 Acceso restringido")
+        st.write("Debes iniciar sesión con Google para usar esta aplicación.")
+        st.button("Iniciar sesión con Google", on_click=st.login)
+        st.stop()
+
+    # Validación de dominio
+    email = (getattr(st.user, "email", "") or "").lower()
+    if not email.endswith(CORP_DOMAIN):
+        st.set_page_config(page_title="Acceso restringido", layout="centered")
+        st.title("🔐 Acceso restringido")
+        st.error(f"Debes ingresar con una cuenta permitida ({CORP_DOMAIN}).")
+        st.write(f"Sesión detectada: {email or '(sin email)'}")
+        st.button("Cerrar sesión", on_click=st.logout)
+        st.stop()
+
+# Ejecutar gate ANTES de renderizar el resto
+require_login_and_domain()
+
+# Sidebar (opcional) para mostrar usuario y cerrar sesión
+with st.sidebar:
+    st.write("### Sesión")
+    st.write(f"Conectado como: **{st.user.email}**")
+    st.button("Cerrar sesión", on_click=st.logout)
+
+# =========================================================
 # Configuración general
 # =========================================================
 st.set_page_config(
