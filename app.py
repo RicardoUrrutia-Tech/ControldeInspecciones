@@ -5,7 +5,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 # =========================================================
-# Configuración general (DEBE ir antes que cualquier st.*)
+# Configuración general (solo 1 vez y al inicio)
 # =========================================================
 st.set_page_config(
     page_title="Última Inspección por Patente – Aeropuerto",
@@ -15,10 +15,10 @@ st.set_page_config(
 # =========================================================
 # SSO / Acceso restringido (Google OAuth vía Streamlit)
 # =========================================================
-CORP_DOMAIN = "@gmail.com"  # ✅ pruebas; luego cambia a @tuempresa.com
+CORP_DOMAIN = "@cabify.com"
 
 def require_login_and_domain():
-    # 1) Verifica que existan secrets de auth (para evitar errores confusos)
+    # Fail-fast: si no están los secrets de auth, muestra error claro
     if "auth" not in st.secrets:
         st.error(
             "No se encontró configuración [auth] en Secrets de Streamlit Cloud.\n\n"
@@ -26,35 +26,26 @@ def require_login_and_domain():
         )
         st.stop()
 
-    # 2) Compatibilidad: si st.user no está disponible por versión/config
-    user_obj = getattr(st, "user", None)
-    if user_obj is None:
-        st.error(
-            "Tu versión/configuración de Streamlit no expone st.user.\n\n"
-            "Verifica que estás usando streamlit reciente y que OAuth esté configurado."
-        )
-        st.stop()
-
-    # 3) Si no está logueado, muestra pantalla de login
+    # Si no está autenticado, pedir login
     if not getattr(st.user, "is_logged_in", False):
         st.title("🔐 Acceso restringido")
-        st.write("Debes iniciar sesión con Google para usar esta aplicación.")
+        st.write("Debes iniciar sesión con tu cuenta corporativa para usar esta aplicación.")
         st.button("Iniciar sesión con Google", on_click=st.login)
         st.stop()
 
-    # 4) Validación de dominio
-    email = (getattr(st.user, "email", "") or "").lower()
+    # Validar dominio corporativo
+    email = (getattr(st.user, "email", "") or "").strip().lower()
     if not email.endswith(CORP_DOMAIN):
         st.title("🔐 Acceso restringido")
-        st.error(f"Debes ingresar con una cuenta permitida ({CORP_DOMAIN}).")
+        st.error(f"Debes ingresar con una cuenta corporativa ({CORP_DOMAIN}).")
         st.write(f"Sesión detectada: {email or '(sin email)'}")
         st.button("Cerrar sesión", on_click=st.logout)
         st.stop()
 
-# Ejecutar gate ANTES de renderizar el resto
+# Ejecuta el gate ANTES de renderizar cualquier cosa sensible (incluidos links)
 require_login_and_domain()
 
-# Sidebar (opcional) para mostrar usuario y cerrar sesión
+# Sidebar de sesión
 with st.sidebar:
     st.write("### Sesión")
     st.write(f"Conectado como: **{st.user.email}**")
@@ -399,4 +390,3 @@ with st.expander("🛠️ Solución de problemas (si no puedes descargar)"):
         "- Si aun así no te deja, pide permisos al dueño del archivo (Drive corporativo).\n"
         "- Si subes un Excel y la app dice que faltan columnas, revisa que hayas descargado el archivo correcto desde los botones."
     )
-
