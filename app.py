@@ -1,8 +1,11 @@
 import io
 import re
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+
 
 # =========================================================
 # Configuración general (solo 1 vez y al inicio)
@@ -19,10 +22,7 @@ CORP_DOMAIN = "@cabify.com"
 
 def require_login_and_domain():
     if "auth" not in st.secrets:
-        st.error(
-            "No se encontró configuración [auth] en Secrets de Streamlit Cloud.\n\n"
-            "Ve a Settings → Secrets y pega el bloque [auth] (client_id, client_secret, redirect_uri, etc.)."
-        )
+        st.error("No se encontró configuración [auth] en Secrets de Streamlit Cloud.")
         st.stop()
 
     if not getattr(st.user, "is_logged_in", False):
@@ -57,14 +57,14 @@ h4, h5, h6 { color: #4A2B8D; }
 section[data-testid="stSidebar"] { background-color: #1F123F; }
 section[data-testid="stSidebar"] * { color: #FAF8FE !important; }
 
-/* Botones */
+/* Botones informales (st.button / download) */
 .stButton>button, .stDownloadButton>button {
     background-color: #7145D6;
     color: #FFFFFF;
     border-radius: 10px;
     border: none;
     padding: 0.55rem 0.9rem;
-    font-weight: 600;
+    font-weight: 700;
 }
 .stButton>button:hover, .stDownloadButton>button:hover {
     background-color: #5B34AC;
@@ -77,11 +77,11 @@ a[data-testid="stLinkButton"] {
     color: #FFFFFF !important;
     border-radius: 10px !important;
     padding: 0.55rem 0.9rem !important;
-    font-weight: 700 !important;
+    font-weight: 800 !important;
     border: none !important;
 }
 
-/* Alerts (info/success/warn/error) */
+/* Alerts */
 div[data-testid="stAlert"] { border-radius: 10px; }
 
 /* Separadores */
@@ -95,7 +95,15 @@ with st.sidebar:
     st.button("Cerrar sesión", on_click=st.logout)
 
 # =========================================================
-# Links de descarga (privado: descarga en navegador con sesión del usuario)
+# Portada (imagen adjunta en el repo)
+# =========================================================
+# Guarda tu imagen en: assets/portada_aeropuerto.png  (o cambia el nombre aquí)
+PORTADA_PATH = Path("assets/portada_aeropuerto.png")
+if PORTADA_PATH.exists():
+    st.image(str(PORTADA_PATH), use_container_width=True)
+
+# =========================================================
+# Links de descarga (Drive)
 # =========================================================
 PATENTES_EXPORT_URL = (
     "https://docs.google.com/spreadsheets/d/"
@@ -116,8 +124,8 @@ def normalize_headers(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = (
         df.columns.astype(str)
-        .str.replace("\u00a0", " ", regex=False)
-        .str.replace(r"\s+", " ", regex=True)
+        .str.replace("\u00a0", " ", regex=False)   # NBSP
+        .str.replace(r"\s+", " ", regex=True)     # colapsa espacios/saltos de línea
         .str.strip()
     )
     return df
@@ -149,6 +157,7 @@ def traffic_light(days, green_max, yellow_max):
 
 def compliance_label(x):
     """
+    Devuelve:
     - 'Cumple' si valor == 100
     - 'No Cumple' si valor < 100
     - NaN si no hay valor
@@ -162,93 +171,80 @@ def compliance_label(x):
 
 def style_semaforo(val: str) -> str:
     if val == "🟢 OK":
-        return "color: #0C936B; font-weight: 700"
+        return "color: #0C936B; font-weight: 800"
     if val == "🟡 Alerta":
-        return "color: #EFBD03; font-weight: 700"
+        return "color: #EFBD03; font-weight: 800"
     if val == "🔴 Crítico":
-        return "color: #E74A41; font-weight: 700"
+        return "color: #E74A41; font-weight: 800"
     if val == "⚫ Sin inspección":
-        return "color: #362065; font-weight: 700"
+        return "color: #362065; font-weight: 800"
     return ""
 
 def style_cumplimiento(val: str) -> str:
     if val == "Cumple":
-        return "color: #0C936B; font-weight: 700"
+        return "color: #0C936B; font-weight: 800"
     if val == "No Cumple":
-        return "color: #E74A41; font-weight: 700"
+        return "color: #E74A41; font-weight: 800"
     return ""
 
 def to_excel_bytes(df: pd.DataFrame) -> bytes:
     """
-    Export con look Cabify:
-    - Header morado Cabify
+    Export Cabify:
+    - Header morado
     - Congelar primera fila
-    - Formato condicional simple (Semáforo y Cumplimientos)
+    - Estilo básico de Semáforo + Cumplimientos (font)
     """
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="resultado")
         ws = writer.sheets["resultado"]
 
-        from openpyxl.styles import PatternFill, Font, Alignment
+        from openpyxl.styles import PatternFill, Font
         from openpyxl.utils import get_column_letter
 
-        # Header
-        header_fill = PatternFill("solid", fgColor="7145D6")  # Cabify morado
+        header_fill = PatternFill("solid", fgColor="7145D6")
         header_font = Font(color="FFFFFF", bold=True)
-        header_align = Alignment(vertical="center")
 
         for cell in ws[1]:
             cell.fill = header_fill
             cell.font = header_font
-            cell.alignment = header_align
 
         ws.freeze_panes = "A2"
 
-        # Ajuste simple de ancho (sin sobre-optimizar)
+        # Ajuste simple de ancho
         for i, col_name in enumerate(df.columns, start=1):
-            width = min(max(len(str(col_name)) + 2, 14), 38)
+            width = min(max(len(str(col_name)) + 2, 14), 40)
             ws.column_dimensions[get_column_letter(i)].width = width
 
-        # Colores Cabify (fill)
-        fill_ok = PatternFill("solid", fgColor="DFDAF8")       # suave moradul claro
-        fill_alert = PatternFill("solid", fgColor="F5F1FC")    # muy suave
-        fill_crit = PatternFill("solid", fgColor="F5F1FC")     # suave
-        font_ok = Font(color="0C936B", bold=True)              # verde
-        font_alert = Font(color="EFBD03", bold=True)           # amarillo
-        font_crit = Font(color="E74A41", bold=True)            # rojo
-        font_neutral = Font(color="362065", bold=True)         # moradul
+        # Colores
+        font_ok = Font(color="0C936B", bold=True)
+        font_alert = Font(color="EFBD03", bold=True)
+        font_crit = Font(color="E74A41", bold=True)
+        font_neutral = Font(color="362065", bold=True)
 
-        # Map columnas
-        col_index = {name: idx + 1 for idx, name in enumerate(df.columns)}
-        sem_col = col_index.get("Semáforo")
-        ce_col = col_index.get("Cumplimiento Exterior")
-        ci_col = col_index.get("Cumplimiento Interior")
-        cc_col = col_index.get("Cumplimiento Conductor")
+        idx = {name: j + 1 for j, name in enumerate(df.columns)}
+        sem_col = idx.get("Semáforo")
+        ce_col = idx.get("Cumplimiento Exterior")
+        ci_col = idx.get("Cumplimiento Interior")
+        cc_col = idx.get("Cumplimiento Conductor")
 
-        def paint_cell(r, c, fill=None, font=None):
+        def set_font(r, c, font):
             if c is None:
                 return
-            cell = ws.cell(row=r, column=c)
-            if fill is not None:
-                cell.fill = fill
-            if font is not None:
-                cell.font = font
+            ws.cell(row=r, column=c).font = font
 
-        # Aplicar estilos por fila
-        max_row = ws.max_row
-        for r in range(2, max_row + 1):
+        for r in range(2, ws.max_row + 1):
             # Semáforo
             if sem_col is not None:
                 v = ws.cell(row=r, column=sem_col).value
                 if v == "🟢 OK":
-                    paint_cell(r, sem_col, fill_ok, font_ok)
+                    set_font(r, sem_col, font_ok)
                 elif v == "🟡 Alerta":
-                    paint_cell(r, sem_col, fill_alert, font_alert)
+                    set_font(r, sem_col, font_alert)
                 elif v == "🔴 Crítico":
-                    paint_cell(r, sem_col, fill_crit, font_crit)
+                    set_font(r, sem_col, font_crit)
                 elif v == "⚫ Sin inspección":
-                    paint_cell(r, sem_col, fill=None, font=font_neutral)
+                    set_font(r, sem_col, font_neutral)
 
             # Cumplimientos
             for ccol in [ce_col, ci_col, cc_col]:
@@ -256,9 +252,9 @@ def to_excel_bytes(df: pd.DataFrame) -> bytes:
                     continue
                 v = ws.cell(row=r, column=ccol).value
                 if v == "Cumple":
-                    paint_cell(r, ccol, fill=None, font=font_ok)
+                    set_font(r, ccol, font_ok)
                 elif v == "No Cumple":
-                    paint_cell(r, ccol, fill=None, font=font_crit)
+                    set_font(r, ccol, font_crit)
 
     return output.getvalue()
 
@@ -267,14 +263,13 @@ def to_excel_bytes(df: pd.DataFrame) -> bytes:
 # =========================================================
 st.title("🚗 Última inspección por patente – Aeropuerto")
 st.caption(
-    "La descarga se realiza en tu navegador (con tu sesión corporativa) y luego subes los Excel aquí."
+    "Esta app mantiene los Google Sheets **privados**. "
+    "La descarga se hace en tu navegador usando tu **sesión corporativa**, y luego subes los Excel aquí."
 )
 
 st.divider()
 
-# =========================================================
 # Paso 1: Descargas
-# =========================================================
 st.subheader("Paso 1) Descarga los Excel")
 st.info("Abre cada botón y descarga el Excel. Luego vuelve a esta app para subir ambos archivos.")
 
@@ -286,9 +281,7 @@ with c2:
 
 st.divider()
 
-# =========================================================
-# Paso 2: Subida de archivos
-# =========================================================
+# Paso 2: Upload
 st.subheader("Paso 2) Sube los dos archivos descargados")
 
 col_u1, col_u2 = st.columns(2)
@@ -304,6 +297,7 @@ if not f_pat or not f_insp:
 df_pat = normalize_headers(pd.read_excel(f_pat))
 df_insp = normalize_headers(pd.read_excel(f_insp))
 
+# Validaciones mínimas
 if "REG PLATE" not in df_pat.columns:
     st.error(
         "❌ El archivo de Patentes no parece correcto: falta la columna **REG PLATE**.\n"
@@ -335,9 +329,7 @@ st.success("✅ Archivos cargados correctamente.")
 st.caption("Si subes un Excel y la app dice que faltan columnas, revisa que hayas descargado el archivo correcto desde los botones.")
 st.divider()
 
-# =========================================================
 # Paso 3: Resultados
-# =========================================================
 st.subheader("Paso 3) Resultados")
 
 with st.expander("⚙️ Configuración semáforo (días desde la última inspección)", expanded=True):
@@ -368,7 +360,7 @@ df_last = (
     .first()
 )
 
-# Convertir Cumplimientos a Cumple / No Cumple
+# Cumplimiento -> Cumple / No Cumple
 for c in ["Cumplimiento Exterior", "Cumplimiento Interior", "Cumplimiento Conductor"]:
     df_last[c] = df_last[c].apply(compliance_label)
 
@@ -409,8 +401,11 @@ with left:
     st.subheader("🧾 Top sin inspección (primeras 20)")
     base_cols = [c for c in ["REG PLATE", "Flota", "Company", "Marca", "Modelo", "Color"] if c in df.columns]
     cols_never = base_cols + ["Semáforo"]
-    df_never = df[df["Inspeccionado"] == False][cols_never].head(20)
-    st.dataframe(df_never, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df[df["Inspeccionado"] == False][cols_never].head(20),
+        use_container_width=True,
+        hide_index=True
+    )
 
 with right:
     st.subheader("🕰️ Top inspecciones más antiguas (primeras 20)")
@@ -430,17 +425,16 @@ with right:
         .head(20)
     )
     st.dataframe(
-        df_old.style.applymap(style_semaforo, subset=["Semáforo"])
-                    .applymap(style_cumplimiento, subset=[
-                        c for c in ["Cumplimiento Exterior", "Cumplimiento Interior", "Cumplimiento Conductor"] if c in df_old.columns
-                    ]),
+        df_old.style
+            .applymap(style_semaforo, subset=["Semáforo"])
+            .applymap(style_cumplimiento, subset=[c for c in ["Cumplimiento Exterior", "Cumplimiento Interior", "Cumplimiento Conductor"] if c in df_old.columns]),
         use_container_width=True,
         hide_index=True
     )
 
 st.divider()
 
-# Gráfico distribución (más pequeño)
+# Gráfico distribución (compacto + barras moradul)
 st.subheader("📊 Distribución de días desde última inspección (solo inspeccionados)")
 
 vals = df.loc[df["Inspeccionado"] == True, "Días desde última inspección"].dropna()
@@ -451,7 +445,7 @@ else:
     g_left, g_right = st.columns([2, 3])  # compacto
     with g_left:
         fig = plt.figure(figsize=(6, 3))
-        plt.hist(vals, bins=bins)
+        plt.hist(vals, bins=bins, color="#4A2B8D")  # ← moradul Cabify
         plt.xlabel("Días")
         plt.ylabel("Cantidad")
         st.pyplot(fig, use_container_width=True)
@@ -502,7 +496,6 @@ for c in optional_base_cols:
 
 cols_view = [c for c in cols_view if c in df_show.columns]
 
-# Dataframe con estilo Cabify (semáforo + cumple/no cumple)
 styler = (
     df_show[cols_view].style
     .applymap(style_semaforo, subset=["Semáforo"] if "Semáforo" in cols_view else None)
