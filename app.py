@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 # Configuración general (solo 1 vez y al inicio)
 # =========================================================
 st.set_page_config(
-    page_title="Última Inspección por Patente – Aeropuerto",
+#    page_title="Última Inspección por Patente – Aeropuerto",
     layout="wide"
 )
 
