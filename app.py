@@ -41,13 +41,61 @@ def require_login_and_domain():
 
 require_login_and_domain()
 
+# =========================================================
+# Estilo Cabify (CSS)
+# =========================================================
+st.markdown("""
+<style>
+/* Fondo general */
+.stApp { background-color: #FAF8FE; }
+
+/* Títulos */
+h1, h2, h3 { color: #1F123F; }
+h4, h5, h6 { color: #4A2B8D; }
+
+/* Sidebar */
+section[data-testid="stSidebar"] { background-color: #1F123F; }
+section[data-testid="stSidebar"] * { color: #FAF8FE !important; }
+
+/* Botones */
+.stButton>button, .stDownloadButton>button {
+    background-color: #7145D6;
+    color: #FFFFFF;
+    border-radius: 10px;
+    border: none;
+    padding: 0.55rem 0.9rem;
+    font-weight: 600;
+}
+.stButton>button:hover, .stDownloadButton>button:hover {
+    background-color: #5B34AC;
+    color: #FFFFFF;
+}
+
+/* Link buttons */
+a[data-testid="stLinkButton"] {
+    background-color: #8A6EE4 !important;
+    color: #FFFFFF !important;
+    border-radius: 10px !important;
+    padding: 0.55rem 0.9rem !important;
+    font-weight: 700 !important;
+    border: none !important;
+}
+
+/* Alerts (info/success/warn/error) */
+div[data-testid="stAlert"] { border-radius: 10px; }
+
+/* Separadores */
+hr { border-top: 1px solid #DFDAF8; }
+</style>
+""", unsafe_allow_html=True)
+
 with st.sidebar:
     st.write("### Sesión")
     st.write(f"Conectado como: **{st.user.email}**")
     st.button("Cerrar sesión", on_click=st.logout)
 
 # =========================================================
-# Links de descarga (privado: descarga ocurre con sesión del usuario)
+# Links de descarga (privado: descarga en navegador con sesión del usuario)
 # =========================================================
 PATENTES_EXPORT_URL = (
     "https://docs.google.com/spreadsheets/d/"
@@ -68,8 +116,8 @@ def normalize_headers(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = (
         df.columns.astype(str)
-        .str.replace("\u00a0", " ", regex=False)   # NBSP
-        .str.replace(r"\s+", " ", regex=True)     # colapsa espacios/saltos de línea
+        .str.replace("\u00a0", " ", regex=False)
+        .str.replace(r"\s+", " ", regex=True)
         .str.strip()
     )
     return df
@@ -99,15 +147,8 @@ def traffic_light(days, green_max, yellow_max):
         return "🟡 Alerta"
     return "🔴 Crítico"
 
-def to_excel_bytes(df: pd.DataFrame) -> bytes:
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="resultado")
-    return output.getvalue()
-
 def compliance_label(x):
     """
-    Devuelve:
     - 'Cumple' si valor == 100
     - 'No Cumple' si valor < 100
     - NaN si no hay valor
@@ -119,14 +160,114 @@ def compliance_label(x):
         return pd.NA
     return "Cumple" if v >= 100 else "No Cumple"
 
+def style_semaforo(val: str) -> str:
+    if val == "🟢 OK":
+        return "color: #0C936B; font-weight: 700"
+    if val == "🟡 Alerta":
+        return "color: #EFBD03; font-weight: 700"
+    if val == "🔴 Crítico":
+        return "color: #E74A41; font-weight: 700"
+    if val == "⚫ Sin inspección":
+        return "color: #362065; font-weight: 700"
+    return ""
+
+def style_cumplimiento(val: str) -> str:
+    if val == "Cumple":
+        return "color: #0C936B; font-weight: 700"
+    if val == "No Cumple":
+        return "color: #E74A41; font-weight: 700"
+    return ""
+
+def to_excel_bytes(df: pd.DataFrame) -> bytes:
+    """
+    Export con look Cabify:
+    - Header morado Cabify
+    - Congelar primera fila
+    - Formato condicional simple (Semáforo y Cumplimientos)
+    """
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="resultado")
+        ws = writer.sheets["resultado"]
+
+        from openpyxl.styles import PatternFill, Font, Alignment
+        from openpyxl.utils import get_column_letter
+
+        # Header
+        header_fill = PatternFill("solid", fgColor="7145D6")  # Cabify morado
+        header_font = Font(color="FFFFFF", bold=True)
+        header_align = Alignment(vertical="center")
+
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = header_align
+
+        ws.freeze_panes = "A2"
+
+        # Ajuste simple de ancho (sin sobre-optimizar)
+        for i, col_name in enumerate(df.columns, start=1):
+            width = min(max(len(str(col_name)) + 2, 14), 38)
+            ws.column_dimensions[get_column_letter(i)].width = width
+
+        # Colores Cabify (fill)
+        fill_ok = PatternFill("solid", fgColor="DFDAF8")       # suave moradul claro
+        fill_alert = PatternFill("solid", fgColor="F5F1FC")    # muy suave
+        fill_crit = PatternFill("solid", fgColor="F5F1FC")     # suave
+        font_ok = Font(color="0C936B", bold=True)              # verde
+        font_alert = Font(color="EFBD03", bold=True)           # amarillo
+        font_crit = Font(color="E74A41", bold=True)            # rojo
+        font_neutral = Font(color="362065", bold=True)         # moradul
+
+        # Map columnas
+        col_index = {name: idx + 1 for idx, name in enumerate(df.columns)}
+        sem_col = col_index.get("Semáforo")
+        ce_col = col_index.get("Cumplimiento Exterior")
+        ci_col = col_index.get("Cumplimiento Interior")
+        cc_col = col_index.get("Cumplimiento Conductor")
+
+        def paint_cell(r, c, fill=None, font=None):
+            if c is None:
+                return
+            cell = ws.cell(row=r, column=c)
+            if fill is not None:
+                cell.fill = fill
+            if font is not None:
+                cell.font = font
+
+        # Aplicar estilos por fila
+        max_row = ws.max_row
+        for r in range(2, max_row + 1):
+            # Semáforo
+            if sem_col is not None:
+                v = ws.cell(row=r, column=sem_col).value
+                if v == "🟢 OK":
+                    paint_cell(r, sem_col, fill_ok, font_ok)
+                elif v == "🟡 Alerta":
+                    paint_cell(r, sem_col, fill_alert, font_alert)
+                elif v == "🔴 Crítico":
+                    paint_cell(r, sem_col, fill_crit, font_crit)
+                elif v == "⚫ Sin inspección":
+                    paint_cell(r, sem_col, fill=None, font=font_neutral)
+
+            # Cumplimientos
+            for ccol in [ce_col, ci_col, cc_col]:
+                if ccol is None:
+                    continue
+                v = ws.cell(row=r, column=ccol).value
+                if v == "Cumple":
+                    paint_cell(r, ccol, fill=None, font=font_ok)
+                elif v == "No Cumple":
+                    paint_cell(r, ccol, fill=None, font=font_crit)
+
+    return output.getvalue()
+
 # =========================================================
 # UI
 # =========================================================
 st.title("🚗 Última inspección por patente – Aeropuerto")
-
 st.caption(
-    "Esta app mantiene los Google Sheets **privados**. "
-    "La descarga se hace en tu navegador usando tu **sesión corporativa**, y luego subes los Excel aquí."
+    "La descarga se realiza en tu navegador (con tu sesión corporativa) y luego subes los Excel aquí."
 )
 
 st.divider()
@@ -135,10 +276,7 @@ st.divider()
 # Paso 1: Descargas
 # =========================================================
 st.subheader("Paso 1) Descarga los Excel")
-
-st.info(
-    "Abre cada botón y descarga el Excel. Luego vuelve a esta app para subir ambos archivos."
-)
+st.info("Abre cada botón y descarga el Excel. Luego vuelve a esta app para subir ambos archivos.")
 
 c1, c2 = st.columns(2)
 with c1:
@@ -271,11 +409,8 @@ with left:
     st.subheader("🧾 Top sin inspección (primeras 20)")
     base_cols = [c for c in ["REG PLATE", "Flota", "Company", "Marca", "Modelo", "Color"] if c in df.columns]
     cols_never = base_cols + ["Semáforo"]
-    st.dataframe(
-        df[df["Inspeccionado"] == False][cols_never].head(20),
-        use_container_width=True,
-        hide_index=True
-    )
+    df_never = df[df["Inspeccionado"] == False][cols_never].head(20)
+    st.dataframe(df_never, use_container_width=True, hide_index=True)
 
 with right:
     st.subheader("🕰️ Top inspecciones más antiguas (primeras 20)")
@@ -289,10 +424,16 @@ with right:
         "Cumplimiento Conductor",
     ]
     cols_old = [c for c in cols_old if c in df.columns]
-    st.dataframe(
+    df_old = (
         df[df["Inspeccionado"] == True]
         .sort_values("Días desde última inspección", ascending=False)[cols_old]
-        .head(20),
+        .head(20)
+    )
+    st.dataframe(
+        df_old.style.applymap(style_semaforo, subset=["Semáforo"])
+                    .applymap(style_cumplimiento, subset=[
+                        c for c in ["Cumplimiento Exterior", "Cumplimiento Interior", "Cumplimiento Conductor"] if c in df_old.columns
+                    ]),
         use_container_width=True,
         hide_index=True
     )
@@ -307,7 +448,7 @@ if vals.empty:
     st.info("No hay inspecciones con fecha válida para graficar.")
 else:
     bins = st.slider("Número de bins (barras)", min_value=5, max_value=60, value=20, step=1)
-    g_left, g_right = st.columns([2, 3])  # el gráfico queda más compacto
+    g_left, g_right = st.columns([2, 3])  # compacto
     with g_left:
         fig = plt.figure(figsize=(6, 3))
         plt.hist(vals, bins=bins)
@@ -361,7 +502,17 @@ for c in optional_base_cols:
 
 cols_view = [c for c in cols_view if c in df_show.columns]
 
-st.dataframe(df_show[cols_view], use_container_width=True, hide_index=True)
+# Dataframe con estilo Cabify (semáforo + cumple/no cumple)
+styler = (
+    df_show[cols_view].style
+    .applymap(style_semaforo, subset=["Semáforo"] if "Semáforo" in cols_view else None)
+    .applymap(
+        style_cumplimiento,
+        subset=[c for c in ["Cumplimiento Exterior", "Cumplimiento Interior", "Cumplimiento Conductor"] if c in cols_view]
+    )
+)
+
+st.dataframe(styler, use_container_width=True, hide_index=True)
 
 st.download_button(
     "⬇️ Descargar resultado filtrado (Excel)",
