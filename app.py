@@ -18,7 +18,6 @@ st.set_page_config(
 CORP_DOMAIN = "@cabify.com"
 
 def require_login_and_domain():
-    # Fail-fast: si no están los secrets de auth, muestra error claro
     if "auth" not in st.secrets:
         st.error(
             "No se encontró configuración [auth] en Secrets de Streamlit Cloud.\n\n"
@@ -26,14 +25,12 @@ def require_login_and_domain():
         )
         st.stop()
 
-    # Si no está autenticado, pedir login
     if not getattr(st.user, "is_logged_in", False):
         st.title("🔐 Acceso restringido")
         st.write("Debes iniciar sesión con tu cuenta corporativa para usar esta aplicación.")
         st.button("Iniciar sesión con Google", on_click=st.login)
         st.stop()
 
-    # Validar dominio corporativo
     email = (getattr(st.user, "email", "") or "").strip().lower()
     if not email.endswith(CORP_DOMAIN):
         st.title("🔐 Acceso restringido")
@@ -42,10 +39,8 @@ def require_login_and_domain():
         st.button("Cerrar sesión", on_click=st.logout)
         st.stop()
 
-# Ejecuta el gate ANTES de renderizar cualquier cosa sensible (incluidos links)
 require_login_and_domain()
 
-# Sidebar de sesión
 with st.sidebar:
     st.write("### Sesión")
     st.write(f"Conectado como: **{st.user.email}**")
@@ -70,23 +65,16 @@ INSPECCIONES_EXPORT_URL = (
 # Utilidades
 # =========================================================
 def normalize_headers(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Normaliza encabezados para evitar errores por:
-    - espacios dobles / al final
-    - saltos de línea
-    - NBSP (espacio no separable)
-    """
     df = df.copy()
     df.columns = (
         df.columns.astype(str)
         .str.replace("\u00a0", " ", regex=False)   # NBSP
         .str.replace(r"\s+", " ", regex=True)     # colapsa espacios/saltos de línea
-        .str.strip()                              # quita espacios al inicio/fin
+        .str.strip()
     )
     return df
 
 def normalize_plate(x: str) -> str:
-    """Normaliza patente: mayúsculas y solo A-Z0-9."""
     if pd.isna(x):
         return ""
     s = str(x).strip().upper()
@@ -94,11 +82,6 @@ def normalize_plate(x: str) -> str:
     return s
 
 def try_parse_date(series: pd.Series) -> pd.Series:
-    """
-    Intenta parsear fechas:
-    - texto datetime (dayfirst)
-    - serial Excel
-    """
     dt = pd.to_datetime(series, errors="coerce", dayfirst=True)
     mask = dt.isna()
     if mask.any():
@@ -122,6 +105,20 @@ def to_excel_bytes(df: pd.DataFrame) -> bytes:
         df.to_excel(writer, index=False, sheet_name="resultado")
     return output.getvalue()
 
+def compliance_label(x):
+    """
+    Devuelve:
+    - 'Cumple' si valor == 100
+    - 'No Cumple' si valor < 100
+    - NaN si no hay valor
+    """
+    if pd.isna(x):
+        return pd.NA
+    v = pd.to_numeric(str(x).strip().replace("%", ""), errors="coerce")
+    if pd.isna(v):
+        return pd.NA
+    return "Cumple" if v >= 100 else "No Cumple"
+
 # =========================================================
 # UI
 # =========================================================
@@ -135,15 +132,12 @@ st.caption(
 st.divider()
 
 # =========================================================
-# Asistente Paso 1: sesión corporativa + descargas
+# Paso 1: Descargas
 # =========================================================
-st.subheader("Paso 1) Inicia sesión con tu cuenta corporativa y descarga los Excel")
+st.subheader("Paso 1) Descarga los Excel")
 
 st.info(
-    "✅ Abre cada botón y descarga el Excel.\n"
-    "Si te aparece **Access denied / Solicitar acceso**, inicia sesión con tu **cuenta corporativa** "
-    "y vuelve a intentar.\n\n"
-    "Luego vuelve a esta app para subir ambos archivos."
+    "Abre cada botón y descarga el Excel. Luego vuelve a esta app para subir ambos archivos."
 )
 
 c1, c2 = st.columns(2)
@@ -152,21 +146,12 @@ with c1:
 with c2:
     st.link_button("📝 Descargar Inspecciones (Excel)", INSPECCIONES_EXPORT_URL)
 
-st.write("")
-logged = st.checkbox("✅ Ya inicié sesión con mi cuenta corporativa (si era necesario)")
-
 st.divider()
 
 # =========================================================
 # Paso 2: Subida de archivos
 # =========================================================
 st.subheader("Paso 2) Sube los dos archivos descargados")
-
-if not logged:
-    st.warning(
-        "Marca el checkbox cuando hayas iniciado sesión con tu cuenta corporativa (si lo necesitabas). "
-        "Luego sube ambos archivos."
-    )
 
 col_u1, col_u2 = st.columns(2)
 with col_u1:
@@ -178,19 +163,13 @@ if not f_pat or not f_insp:
     st.info("👆 Sube ambos archivos para continuar al Paso 3.")
     st.stop()
 
-# Leer excels
-df_pat = pd.read_excel(f_pat)
-df_insp = pd.read_excel(f_insp)
+df_pat = normalize_headers(pd.read_excel(f_pat))
+df_insp = normalize_headers(pd.read_excel(f_insp))
 
-# Normalizar encabezados (FIX clave)
-df_pat = normalize_headers(df_pat)
-df_insp = normalize_headers(df_insp)
-
-# Validaciones
 if "REG PLATE" not in df_pat.columns:
     st.error(
         "❌ El archivo de Patentes no parece correcto: falta la columna **REG PLATE**.\n"
-        "Descárgalo desde el botón corporativo y vuelve a subirlo."
+        "Descárgalo desde el botón y vuelve a subirlo."
     )
     with st.expander("Ver columnas detectadas (Patentes)"):
         st.write(list(df_pat.columns))
@@ -208,17 +187,18 @@ if missing:
     st.error(
         "❌ El archivo de Inspecciones no parece correcto: faltan columnas clave:\n- "
         + "\n- ".join(missing)
-        + "\n\nDescárgalo desde el botón corporativo y vuelve a subirlo."
+        + "\n\nDescárgalo desde el botón y vuelve a subirlo."
     )
     with st.expander("Ver columnas detectadas (Inspecciones)"):
         st.write(list(df_insp.columns))
     st.stop()
 
 st.success("✅ Archivos cargados correctamente.")
+st.caption("Si subes un Excel y la app dice que faltan columnas, revisa que hayas descargado el archivo correcto desde los botones.")
 st.divider()
 
 # =========================================================
-# Paso 3: Configuración + Resultados
+# Paso 3: Resultados
 # =========================================================
 st.subheader("Paso 3) Resultados")
 
@@ -249,6 +229,10 @@ df_last = (
     .groupby("plate_norm", as_index=False)
     .first()
 )
+
+# Convertir Cumplimientos a Cumple / No Cumple
+for c in ["Cumplimiento Exterior", "Cumplimiento Interior", "Cumplimiento Conductor"]:
+    df_last[c] = df_last[c].apply(compliance_label)
 
 df_last = df_last[
     [
@@ -315,7 +299,7 @@ with right:
 
 st.divider()
 
-# Gráfico distribución
+# Gráfico distribución (más pequeño)
 st.subheader("📊 Distribución de días desde última inspección (solo inspeccionados)")
 
 vals = df.loc[df["Inspeccionado"] == True, "Días desde última inspección"].dropna()
@@ -323,11 +307,13 @@ if vals.empty:
     st.info("No hay inspecciones con fecha válida para graficar.")
 else:
     bins = st.slider("Número de bins (barras)", min_value=5, max_value=60, value=20, step=1)
-    fig = plt.figure()
-    plt.hist(vals, bins=bins)
-    plt.xlabel("Días desde última inspección")
-    plt.ylabel("Cantidad de patentes")
-    st.pyplot(fig)
+    g_left, g_right = st.columns([2, 3])  # el gráfico queda más compacto
+    with g_left:
+        fig = plt.figure(figsize=(6, 3))
+        plt.hist(vals, bins=bins)
+        plt.xlabel("Días")
+        plt.ylabel("Cantidad")
+        st.pyplot(fig, use_container_width=True)
 
 st.divider()
 
@@ -383,10 +369,3 @@ st.download_button(
     file_name="ultima_inspeccion_por_patente.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
-
-with st.expander("🛠️ Solución de problemas (si no puedes descargar)"):
-    st.markdown(
-        "- Si al abrir los enlaces aparece **Solicitar acceso / Access denied**, inicia sesión con tu **cuenta corporativa**.\n"
-        "- Si aun así no te deja, pide permisos al dueño del archivo (Drive corporativo).\n"
-        "- Si subes un Excel y la app dice que faltan columnas, revisa que hayas descargado el archivo correcto desde los botones."
-    )
